@@ -7,6 +7,9 @@ services:
       POSTGRES_USER: pathreview
       POSTGRES_PASSWORD: pathreview
       POSTGRES_DB: pathreview_dev
+      # Volume mount root isn't empty under some container runtimes (e.g. a
+      # lost+found dir), which initdb refuses to initialize into directly.
+      PGDATA: /var/lib/postgresql/data/pgdata
     ports:
       - "5433:5432"
     volumes:
