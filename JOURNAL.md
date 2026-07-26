@@ -35,8 +35,50 @@ I confirmed this by actually reproducing the bug locally (not just reading the i
 
 - Forked to `bnguyen142/pathreview`; `origin` is my fork, `upstream` is set to `ascherj/pathreview`. Note: this repo's own README uses an older clone URL, `jamjamgobambam/pathreview` — that resolves to the same GitHub account (confirmed via `gh repo view`: identical owner ID and issue list), it's just a redirected handle, not a separate fork.
 - **Backing services (Postgres, Redis, ChromaDB) run via Apple's native `container` tool + the third-party `container-compose` bridge, not Docker Desktop.** Both installed via Homebrew (`brew install container container-compose`). `container-compose` reads the existing `docker-compose.yml` as-is — no changes needed to the compose file itself, since all three images (`postgres:16-alpine`, `redis:7-alpine`, `chromadb/chroma`) publish native arm64 builds.
-  - Chose this partly to try Apple's newer tooling, and partly because **Apple has a confirmed timeline for winding down Rosetta 2**: full support through macOS 27 (fall 2026), then largely discontinued starting macOS 28 (fall 2027). Apple began surfacing in-app deprecation warnings starting with macOS 26.4 — I've seen this warning myself on this machine's stable macOS 26.5.2 install (not a beta), so it's already live in production releases. That matters here specifically because SETUP.md's Apple Silicon instructions tell contributors to enable Docker Desktop's "Use Rosetta for x86_64/amd64 emulation" setting — the fast path Docker Desktop uses to run any `linux/amd64`-only image inside the ARM64 VM. Once that support window closes, that path degrades to slow QEMU emulation or stops working outright, which future cohorts on Apple Silicon will hit if any project image lacks a native arm64 build. That's roughly a year out, not an immediate problem, but worth a mention here since this course spans multiple cohorts over time. Apple's `container` tool sidesteps the issue entirely since it doesn't depend on Rosetta at all — it just needs images to publish an arm64 variant, which ours do.
-    - References: [macOS 26.4 will notify users of Rosetta 2 discontinuation (9to5Mac)](https://9to5mac.com/2026/02/16/macos-26-4-will-notify-users-of-rosetta-2-discontinuation/), [Rosetta 2 End of Support: macOS 28 Will Break 18,000+ Intel Apps in 2027 (Tech Times)](https://www.techtimes.com/articles/317445/20260530/rosetta-2-end-support-macos-28-will-break-18000-intel-apps-2027.htm)
+  - Chose Apple's `container` tool partly to try newer tooling, and partly to avoid Docker Desktop's Rosetta-based amd64 emulation path, since all three service images publish native arm64 builds anyway.
   - Rough edge encountered: first-time `container system start` needed an interactive kernel download confirmation (`kata-containers` kernel) — had to auto-confirm it non-interactively. Otherwise setup was a straightforward drop-in replacement for `docker compose up -d`.
   - Postgres also needed one fix beyond plain `docker-compose.yml`: `initdb` refused to start because the container runtime's volume mount left a `lost+found` directory at the mount root, which Postgres treats as "not empty." Fixed by setting `PGDATA` to a subdirectory of the mount (`/var/lib/postgresql/data/pgdata`) instead of the mount root itself — a one-line addition to the `db` service's environment in `docker-compose.yml`.
 - Confirmed `make run` serves the frontend at `http://localhost:5173` (200, correct app shell/title) and the API at `http://localhost:8000` (Swagger docs reachable). The `/health` endpoint itself reports Postgres/Redis as unhealthy, but that's a separate known bug (issues #154, #155) — verified both services directly (`SELECT 1` over asyncpg, `redis.ping()`) and they're genuinely up.
+
+## Week 8 — Reproduction & solution planning
+
+**Reproduction commit link:** [to be filled in after this commit — see git log]
+
+**Reproduction summary:**
+Ran `.venv/bin/pytest tests/unit/test_resume_parser.py -v` locally. Result: **6 failed, 5 passed**. Five of the six failures were pre-existing (predicted in the Week 7 investigation); the sixth (`test_parse_pdf_with_indented_sections`) is a new regression test I added this week specifically to cover the PDF ingestion path:
+
+```text
+FAILED tests/unit/test_resume_parser.py::TestResumeParser::test_parse_single_column_resume_text
+FAILED tests/unit/test_resume_parser.py::TestResumeParser::test_parse_resume_no_work_experience
+FAILED tests/unit/test_resume_parser.py::TestResumeParser::test_parse_pdf_with_indented_sections
+FAILED tests/unit/test_resume_parser.py::TestResumeParser::test_parse_markdown_resume
+FAILED tests/unit/test_resume_parser.py::TestResumeParser::test_detect_sections
+FAILED tests/unit/test_resume_parser.py::TestResumeParser::test_strip_markdown_syntax
+```
+
+The first three (`test_parse_single_column_resume_text`, `test_parse_resume_no_work_experience`, `test_detect_sections`) are named directly in issue #147. `test_parse_markdown_resume` and `test_strip_markdown_syntax` fail for the same root cause (regex patterns in `_strip_markdown()` anchored to `^`/`\n` with no leading-whitespace tolerance) but aren't mentioned in the issue body. `test_parse_pdf_with_indented_sections` is new: none of the issue's named tests exercise `_parse_pdf()` at all, even though the issue specifically calls out PDF-extracted text as the real-world trigger — so I added a test mocking `PdfReader` (following the existing `test_parse_multipage_pdf` pattern) with indented `Experience:`/`Education:`/`Skills:` headers, confirming the exact same bug reproduces through the PDF code path, not just markdown/plain-text.
+
+Full-suite baseline (`.venv/bin/pytest tests/unit -v -m unit`, run before making any production code change): **54 failed, 375 passed**. Only 6 of those 54 belong to `test_resume_parser.py` — the other 48 are pre-existing failures across ~15 unrelated modules, unrelated to this issue.
+
+**Exact keyword misses observed:**
+
+`_detect_sections()` checks each of the 13 known keywords in `SECTION_HEADERS` (resume_parser.py:9-23) against the whole document independently. The keywords actually exercised by these test fixtures are `experience`, `education`, and `skills`. For each, all 4 patterns (resume_parser.py:134-138) require the keyword immediately after `^` or `\n`, with zero whitespace tolerance before it:
+
+| Raw header line (repr, whitespace visible) | Pattern that should match | Exact miss |
+| --- | --- | --- |
+| `'    Experience:'` (4-space indent, `sample_resume_text` fixture) | `` ^experience\s*[:\|-] `` | `^` requires `e` as the very next character; finds a space instead |
+| `'        Education:'` (8-space indent, `test_parse_resume_no_work_experience`) | `` ^education\s*[:\|-] `` | same — 8 spaces sit between `^` and `e` |
+| `'        Skills: Python, JavaScript'` (8-space indent, `test_detect_sections`) | `` ^skills\s*[:\|-] `` | same — regex has no allowance before `s` |
+
+`_strip_markdown()`'s single header regex (resume_parser.py:102, `r"^#+\s+"`) has the identical miss on `'        # Header'` and `'        ## Contact'` / `'        ## Experience'` / `'        ## Skills'` (`test_strip_markdown_syntax`, `test_parse_markdown_resume`): `^#+` requires `#` immediately at line-start, finds a space instead, so the `#`/`##` is never stripped.
+
+**Confirmed the bug also reproduces through the PDF path:** none of the 5 failing tests actually exercise `_parse_pdf()` — they're all markdown/plain-text input. Ran a one-off diagnostic (mocking `PdfReader` the same way `test_parse_multipage_pdf` does, with a page returning indented `Experience:`/`Education:`/`Skills:` headers) and confirmed `parser.parse(pdf_bytes)` also returns `detected_sections: []`. This matters because the issue names PDF-extracted text as the real-world trigger — this confirms the fix needs a dedicated PDF-path regression test (see `PLAN.md` Plan step 5), not just coverage through the markdown path.
+
+**PLAN.md link:** [PLAN.md](https://github.com/bnguyen142/pathreview/blob/fix/147-resume-section-whitespace/PLAN.md)
+
+**Walkthrough video (recommended):** [Week 8 walkthrough](https://youtu.be/I53GGVbN0T4)
+
+**Blockers or open questions:**
+Hit and resolved one blocker this week: committing the new `test_parse_pdf_with_indented_sections` test tripped the `mypy` pre-commit hook, which flagged 12 missing-type-annotation errors in `test_resume_parser.py` — 11 of them pre-existing, in tests I didn't write. Root cause: `make typecheck` (the Makefile target `CONTRIBUTING.md` points to) excludes `tests/` entirely, so this file's lack of type annotations had never been caught before, while the pre-commit hook has no such exclusion. Fixed by adding proper type annotations to all 12 functions, plus two `# type: ignore[arg-type]` comments on tests that intentionally pass invalid types to verify runtime validation. Verified all three hooks (ruff, black, mypy) now pass, and the actual test results are unchanged (6 failed / 5 passed). Documented as a general risk in `PLAN.md` for Week 9.
+
+Remaining open question for the fix itself: how to make the regex leading-whitespace-tolerant without introducing false positives (e.g. a bullet point or code snippet that happens to start with a section-header word after indentation) — captured in `PLAN.md`'s Risks & Unknowns.
