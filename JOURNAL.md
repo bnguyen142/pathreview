@@ -42,7 +42,7 @@ I confirmed this by actually reproducing the bug locally (not just reading the i
 
 ## Week 8 — Reproduction & solution planning
 
-**Reproduction commit link:** [to be filled in after this commit — see git log]
+**Reproduction commit link:** [1f793a1](https://github.com/bnguyen142/pathreview/commit/1f793a1)
 
 **Reproduction summary:**
 Ran `.venv/bin/pytest tests/unit/test_resume_parser.py -v` locally. Result: **6 failed, 5 passed**. Five of the six failures were pre-existing (predicted in the Week 7 investigation); the sixth (`test_parse_pdf_with_indented_sections`) is a new regression test I added this week specifically to cover the PDF ingestion path:
