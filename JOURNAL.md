@@ -82,3 +82,14 @@ Full-suite baseline (`.venv/bin/pytest tests/unit -v -m unit`, run before making
 Hit and resolved one blocker this week: committing the new `test_parse_pdf_with_indented_sections` test tripped the `mypy` pre-commit hook, which flagged 12 missing-type-annotation errors in `test_resume_parser.py` — 11 of them pre-existing, in tests I didn't write. Root cause: `make typecheck` (the Makefile target `CONTRIBUTING.md` points to) excludes `tests/` entirely, so this file's lack of type annotations had never been caught before, while the pre-commit hook has no such exclusion. Fixed by adding proper type annotations to all 12 functions, plus two `# type: ignore[arg-type]` comments on tests that intentionally pass invalid types to verify runtime validation. Verified all three hooks (ruff, black, mypy) now pass, and the actual test results are unchanged (6 failed / 5 passed). Documented as a general risk in `PLAN.md` for Week 9.
 
 Remaining open question for the fix itself: how to make the regex leading-whitespace-tolerant without introducing false positives (e.g. a bullet point or code snippet that happens to start with a section-header word after indentation) — captured in `PLAN.md`'s Risks & Unknowns.
+
+## Week 9 — Implementation
+
+### Responding to Week 7/8 feedback
+
+Grader feedback on the Week 7/8 submission praised the reproduction work but flagged that `PLAN.md`'s risk analysis deferred two unknowns that were cheaply testable during investigation rather than resolving them before finalizing the plan. Closed both before starting implementation:
+
+- **`pypdf` + non-ASCII whitespace:** generated a real indented PDF and ran it through `pypdf.PdfReader(...).extract_text()` — indentation came back as plain ASCII spaces only, no `\xa0`. Committed to keeping `[ \t]*` rather than speculatively widening the character class.
+- **`\r`/CRLF risk:** re-examined the mechanics and confirmed with a regex test that a stray `\r` from Windows line endings never lands in the leading-whitespace gap the fix targets, so no character-class change is needed there either.
+
+Full reasoning and test method for both are in `PLAN.md`'s Risks & Unknowns section (updated in place, not duplicated here).
