@@ -175,6 +175,26 @@ class TestResumeParser:
         assert any("education" in s for s in sections_lower)
         assert any("skills" in s for s in sections_lower)
 
+    def test_detect_sections_tabs_and_no_false_positive(self, parser: ResumeParser) -> None:
+        """Regression test for issue #147: tab-indented headers are detected,
+        and an indented bullet that merely mentions a section keyword
+        mid-sentence is not mistaken for a real header."""
+        text = (
+            "\tExperience:\n"
+            "Senior Developer at TechCorp\n"
+            "\n"
+            "    Education\n"
+            "BS Computer Science\n"
+            "\n"
+            "  - Discussed skills growth with mentor\n"
+        )
+        sections = parser._detect_sections(text)
+        sections_lower = [s.lower() for s in sections]
+
+        assert any("experience" in s for s in sections_lower)
+        assert any("education" in s for s in sections_lower)
+        assert not any("skills" in s for s in sections_lower)
+
     def test_strip_markdown_syntax(self, parser: ResumeParser) -> None:
         """Test markdown syntax stripping."""
         markdown_text = """
