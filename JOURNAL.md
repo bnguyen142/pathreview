@@ -83,13 +83,41 @@ Hit and resolved one blocker this week: committing the new `test_parse_pdf_with_
 
 Remaining open question for the fix itself: how to make the regex leading-whitespace-tolerant without introducing false positives (e.g. a bullet point or code snippet that happens to start with a section-header word after indentation) — captured in `PLAN.md`'s Risks & Unknowns.
 
-## Week 9 — Implementation
+## Week 9 — Solution building & PR submission
 
-### Responding to Week 7/8 feedback
+### Check-in 1 (mid-week)
 
-Grader feedback on the Week 7/8 submission praised the reproduction work but flagged that `PLAN.md`'s risk analysis deferred two unknowns that were cheaply testable during investigation rather than resolving them before finalizing the plan. Closed both before starting implementation:
+**Format note:** This cohort's mid-week check-in was done live during Tuesday's class session, in small groups with classmates, rather than as a written submission by Wednesday — per instructor guidance that check-in cadence/format can vary by cohort. Recording the same content here in writing as well, so Check-in 1 still stands on its own for grading.
 
-- **`pypdf` + non-ASCII whitespace:** generated a real indented PDF and ran it through `pypdf.PdfReader(...).extract_text()` — indentation came back as plain ASCII spaces only, no `\xa0`. Committed to keeping `[ \t]*` rather than speculatively widening the character class.
-- **`\r`/CRLF risk:** re-examined the mechanics and confirmed with a regex test that a stray `\r` from Windows line endings never lands in the leading-whitespace gap the fix targets, so no character-class change is needed there either.
+**Current progress:**
+Responded to Week 7/8 grader feedback before starting implementation: `PLAN.md`'s risk analysis had deferred two unknowns that were cheaply testable rather than resolving them. Closed both — generated a real indented PDF and confirmed `pypdf`'s `extract_text()` returns plain ASCII spaces only (no `\xa0`), and re-examined the CRLF mechanics to confirm a stray `\r` never lands in the leading-whitespace gap the fix targets. Both are documented with method and reasoning in `PLAN.md`'s Risks & Unknowns section.
 
-Full reasoning and test method for both are in `PLAN.md`'s Risks & Unknowns section (updated in place, not duplicated here).
+Implemented the fix per `PLAN.md` steps 1-2: added `[ \t]*` leading-whitespace tolerance to `_strip_markdown()`'s header regex (resume_parser.py:102) and all four `_detect_sections()` patterns (resume_parser.py:134-138). Added the negative-case regression test from step 4 (`test_detect_sections_tabs_and_no_false_positive`) covering tab-indentation and the false-positive guard (an indented bullet mentioning a section keyword mid-sentence must not register as a header).
+
+Verified: `test_resume_parser.py` now 12/12 passing (up from the Week 8 baseline of 5/11). Full suite: 48 failed / 382 passed — the same 48 pre-existing failures from the Week 8 baseline, unchanged; the only movement is the resume-parser tests going green plus the one new test. Confirmed via `git stash` that none of these pre-existing failures are affected by this change.
+
+Also surfaced and explicitly scoped out a repo-wide `make check`/`make typecheck` breakage: `pyproject.toml` pins `numpy>=1.26.0` with no upper bound, current installs resolve to numpy 2.5.1 (stubs require Python 3.12+ syntax), and `[tool.mypy]` still targets `python_version = "3.11"` — so mypy crashes before checking anything. Confirmed identical on `main` via `git stash` (predates this branch), and confirmed via a scoped `--python-version 3.12` run that unblocking it would surface 103 pre-existing type errors across 26 unrelated files. Documented in `PLAN.md`'s "Out of scope" section rather than absorbed into this fix, per the pre-existing-failures guidance for Week 9: `make test-unit` is clean, and `make check`'s failure is pre-existing and unrelated. Confirmed this out-of-scope call with tech fellow Raeesah Iram during Tuesday's in-class small group — touching the 26 unrelated files needed to fix it is not appropriate scope for this Tier 1 PR (full reasoning in `PLAN.md`'s "Out of scope" section).
+
+**Next steps:**
+Run `make check`'s lint/format steps in isolation to confirm the diff itself is clean (separate from the broken typecheck step). Review `docs/CONTRIBUTING.md` for branch naming/commit message/docstring conventions before committing. Open a draft PR early this week for peer/mentor review per the Week 9 guidance, with a PR description that documents the pre-existing `make check` failures and states this change doesn't affect them. Address any review feedback, then mark ready for review and complete Check-in 2.
+
+**Blockers:**
+None blocking progress. Flagging the `make check`/`make typecheck` repo-wide breakage here so it doesn't read as an oversight in Check-in 2 — per the Week 9 "pre-existing failures" guidance, the self-review checkbox will reflect that `make test-unit` passes and `make check`'s failure is documented as pre-existing and unaffected by this change, not a literal clean pass.
+
+---
+
+### Check-in 2 (end of week)
+
+**PR link:** [TODO — fill in at submission]
+
+**Branch:** `fix/147-resume-section-whitespace`
+
+**What you built:**
+[TODO — fill in at submission]
+
+**Tests added or updated:**
+[TODO — fill in at submission]
+
+**Self-review confirmation:** [ ] make check passes  [ ] make test-unit passes
+
+**Draft PR feedback received from:** None — per the Week 9 lecture (Solution Implementation, slide 21), this cohort doesn't do code review this term; self-reviewed against the "Seven Conditions for Done" instead (fix works, existing tests pass, new tests written, follows codebase conventions, linter/pre-existing-failure state documented, docstrings updated, PR description written).
