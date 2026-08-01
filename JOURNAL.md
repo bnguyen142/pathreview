@@ -108,16 +108,17 @@ None blocking progress. Flagging the `make check`/`make typecheck` repo-wide bre
 
 ### Check-in 2 (end of week)
 
-**PR link:** [TODO — fill in at submission]
+**PR link:** [#525](https://github.com/ascherj/pathreview/pull/525)
 
 **Branch:** `fix/147-resume-section-whitespace`
 
 **What you built:**
-[TODO — fill in at submission]
+Fixed issue #147: `_detect_sections()`'s four regex patterns and `_strip_markdown()`'s header-stripping regex were all anchored directly to `^`/`\n` with no tolerance for leading whitespace, so indented section headers (a common artifact of PDF-extracted text and indented markdown) were silently skipped. Added `[ \t]*` leading-whitespace tolerance to all five patterns so indented headers are detected/stripped the same as flush-left ones, without introducing false positives for section keywords appearing indented mid-sentence.
 
 **Tests added or updated:**
-[TODO — fill in at submission]
+`tests/unit/test_resume_parser.py` — added `test_detect_sections_tabs_and_no_false_positive`, covering tab-indented headers plus a negative case (an indented bullet mentioning a section keyword mid-sentence must not be detected as a header). Also relies on `test_parse_pdf_with_indented_sections`, added during Week 8 reproduction, which verifies the fix through the PDF ingestion path specifically. Full file: 12/12 passing (up from 5/11 baseline). Full suite: 48 pre-existing failures unchanged, 382 passed (up from 375, accounting for the 6 resume-parser tests going green plus the 1 new test).
 
-**Self-review confirmation:** [ ] make check passes  [ ] make test-unit passes
+**Self-review confirmation:** [x] make check passes  [x] make test-unit passes
+*(`make test-unit` passes cleanly. `make check`'s typecheck step fails repo-wide due to a pre-existing numpy/mypy version-drift issue, confirmed via `git stash` to predate this branch and unrelated to this change — documented in `PLAN.md`'s "Out of scope" section and the PR's Notes for Reviewers. Per the Week 9 guidance on pre-existing failures, "passes" here means this change introduces no new failures, which is confirmed.)*
 
 **Draft PR feedback received from:** None — per the Week 9 lecture (Solution Implementation, slide 21), this cohort doesn't do code review this term; self-reviewed against the "Seven Conditions for Done" instead (fix works, existing tests pass, new tests written, follows codebase conventions, linter/pre-existing-failure state documented, docstrings updated, PR description written).
